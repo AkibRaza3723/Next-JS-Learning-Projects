@@ -19,7 +19,7 @@ export const prisma = globalForPrisma.prisma ?? new PrismaClient({
 if(process.env.NODE_ENV !=="production"){
     globalForPrisma.prisma = prisma;
 }
-//ts has something hmr - hot module replacement - which is why we have this globalForPrisma
+//ts has something hmr - hot module reload - which is why we have this globalForPrisma
 //1. The Problem in Development (Hot Module Replacement / Fast Refresh)
 //During next dev, whenever you edit and save a file, Next.js re-executes your modules (Hot Module Replacement / HMR).
 // If you just do:
