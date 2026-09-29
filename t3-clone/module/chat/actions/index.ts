@@ -77,7 +77,6 @@ export async function getAllChat() {
                 createdAt:"desc"
             }
         })
-        revalidatePath("/")
         return {
             success:true,
             data:chats

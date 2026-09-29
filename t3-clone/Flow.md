@@ -14,4 +14,5 @@ https://github.com/Aestheticsuraj234/complete-nextjs-course-2026/tree/master/maj
 # Installation - AI 
 * You can get any Ai agent from https://openrouter.ai/models (free models i mean) then add your openrouter api key in .env file - go for setup in API folder.
 * After that use tanstack query (https://tanstack.com/query/latest) to fetch the data from openrouter and then use it in your application. (with theme provider create a query provider too)
+* to show the Ai conversation page we have vercel own aisdk where we can find the component such as chatting and input prompting [elements-ai-sdk.dev] for using these we have to parse our data to a specific formet.(npx shadcn@latest add @ai-elements/all)
 
