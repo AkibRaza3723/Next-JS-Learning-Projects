@@ -11,3 +11,7 @@ https://github.com/Aestheticsuraj234/complete-nextjs-course-2026/tree/master/maj
 * Create a layout.tsx in root directory to wrap around these functions. (now we have directed the main home page in root with require auth and the signIn page with require unAuth).
 * For light and dark theme use themeProvider (search dark theme on shadcn ui docs for ref) then add the code in provider and wrap the whole children inside layout.tsx it. (from this you can set theme according to the system - you modify it further tho)
 
+# Installation - AI 
+* You can get any Ai agent from https://openrouter.ai/models (free models i mean) then add your openrouter api key in .env file - go for setup in API folder.
+* After that use tanstack query (https://tanstack.com/query/latest) to fetch the data from openrouter and then use it in your application. (with theme provider create a query provider too)
+
