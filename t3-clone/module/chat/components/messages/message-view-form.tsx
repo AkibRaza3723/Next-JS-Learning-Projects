@@ -1,5 +1,8 @@
-"use client"
-import { useRouter, useSearchParams } from "next/navigation";
+"use client";
+
+import { useSearchParams, useRouter } from "next/navigation";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useGetChatById } from "../../hooks/user-chats";
 import useAiModels from "../../hooks/use-ai-models";
@@ -9,7 +12,7 @@ import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
-  PromptInputMessage,
+  type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
@@ -17,22 +20,32 @@ import {
 import {
   Conversation,
   ConversationContent,
-  ConversationDownload,
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 
 import { ModelSelector } from "../Chat-view/model-selector";
-import { UIMessage } from "ai";
-import { Message, MessageContent, MessageResponse} from "@/components/ai-elements/message";
-import { Reasoning, ReasoningTrigger,ReasoningContent } from "@/components/ai-elements/reasoning";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
+import { toast } from "sonner";
 
+type MessagePartShape = {
+  type: string;
+  text?: string;
+  [key: string]: unknown;
+};
 
-type MessagePartShape = { type: string; text?: string };
-
-function parseMessageToUI(msg: any) {
-  const basePart = { type: "text", text: msg.content };
-  const role = (msg.messageroll ?? msg.messageRole ?? "user").toLowerCase();
+function parseMessageToUI(msg: any): UIMessage {
+  const basePart = { type: "text" as const, text: msg.content };
+  const role = ((msg.messageroll ?? msg.messageRole ?? "user").toLowerCase()) as UIMessage["role"];
 
   try {
     const parts = JSON.parse(msg.content);
@@ -40,20 +53,24 @@ function parseMessageToUI(msg: any) {
       id: msg.id,
       role,
       parts: Array.isArray(parts) ? parts : [basePart],
-      createdAt: msg.createdAt,
-    };
+    } as UIMessage;
   } catch {
     return {
       id: msg.id,
       role,
       parts: [basePart],
-      createdAt: msg.createdAt,
-    };
+    } as UIMessage;
   }
 }
 
-function MessagePart({ part, messageId, partIndex, role , isStreaming }:{
-   part: MessagePartShape;
+function MessagePart({
+  part,
+  messageId,
+  partIndex,
+  role,
+  isStreaming,
+}: {
+  part: MessagePartShape;
   messageId: string;
   partIndex: number;
   role: UIMessage["role"];
@@ -97,58 +114,153 @@ function MessagePart({ part, messageId, partIndex, role , isStreaming }:{
   return null;
 }
 
+export const MessageViewWithForm = ({ chatId }: { chatId: string }) => {
+  const { data: chatData, isPending } = useGetChatById(chatId);
 
-export const MessageViewForm = ({chatId}:{chatId:string}) => {
-    const router = useRouter()
-    const searchParams = useSearchParams()
-    const shouldAutoTrigger = searchParams.get("autotrigger") === "true"
-    const hasAutoTrigger = useRef(false)
-    
-    const [selectedModel, setSelectedModel] = useState<string | null>(null)
-    const [input, setInput] = useState("");
-
-    const {data, isPending} = useGetChatById(chatId)
-    const {data:models, isPending: isModelLoading} = useAiModels();
-
-    const initialMessage = useMemo(()=>{
-        if( !data?.data?.messages) return [];
-
-        return data.data.messages
-        .filter((message)=> message.content?.trim() && message.id)
-        .map(parseMessageToUI) 
-        //to convert our existing data into Ai-sdk compatible data
-    },[data])
-
-    useEffect(() => {
-        if (data?.data?.model && !selectedModel) {
-            setSelectedModel(data.data.model);
-        }
-    }, [data, selectedModel]);
-    
-    if (isPending || isModelLoading) return <div className="flex items-center justify-center h-full"><Spinner/></div>
-
-    const handleSubmit = () => {}
-    const isStreaming = false
-    // streaming response means writting the response chunk by chunk through Ai and get it to the user (all Ai agents stream the response)
-    const isBuzy = false
-    const status = undefined
-    const error = null as any
-    const stop = () => {}
-    const allMessages = [...initialMessage]
-    
+  if (isPending) {
     return (
-        <div className="max-w-4xl mx-auto p-6 relative size-full h-[calc(100vh-4rem)]">
-          <div className="flex flex-col h-full">
-            {/* chat messages list */}
-            <Conversation className="h-full">
+      <div className="flex items-center justify-center h-full">
+        <Spinner />
+      </div>
+    );
+  }
+
+  if (!chatData?.success || !chatData?.data) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground">
+        Chat Not Found
+      </div>
+    );
+  }
+
+  const rawMessages = chatData.data.messages ?? [];
+  const initialMessages: UIMessage[] = rawMessages
+    .filter((m: any) => m?.id && m?.content?.trim())
+    .map(parseMessageToUI);
+
+  return (
+    <ChatView
+      chatId={chatId}
+      initialMessages={initialMessages}
+      initialModel={chatData.data.model}
+    />
+  );
+};
+
+export const MessageViewForm = MessageViewWithForm;
+
+const ChatView = ({
+  chatId,
+  initialMessages,
+  initialModel,
+}: {
+  chatId: string;
+  initialMessages: UIMessage[];
+  initialModel: string | null;
+}) => {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const shouldAutoTrigger = searchParams.get("autoTrigger") === "true";
+  const hasAutoTriggered = useRef(false);
+
+  const [selectedModel, setSelectedModel] = useState<string | null>(initialModel);
+  const { data: modelsData, isPending: isModelLoading } = useAiModels();
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+      }),
+    []
+  );
+
+  const { messages, status, sendMessage, regenerate, stop, error } = useChat({
+    id: chatId,
+    messages: initialMessages,
+    transport,
+    onError: (err) => {
+      console.log("Chat error", err);
+      toast.error(err.message);
+    },
+  });
+
+  const isBuzy = status === "submitted" || status === "streaming";
+
+  useEffect(() => {
+    if (!shouldAutoTrigger) return;
+    if (hasAutoTriggered.current) return;
+    if (!selectedModel) return;
+    if (messages.length === 0) return;
+    if (messages.at(-1)?.role !== "user") return;
+
+    hasAutoTriggered.current = true;
+
+    regenerate({
+      body: {
+        chatId,
+        model: selectedModel,
+        skipUserMessage: true,
+      },
+    }).catch((err) => {
+      console.error("Auto-trigger failed:", err);
+      toast.error("Failed to generate response");
+    });
+
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("autoTrigger");
+    const query = params.toString();
+    router.replace(`/chat/${chatId}${query ? `?${query}` : ""}`, {
+      scroll: false,
+    });
+  }, [
+    shouldAutoTrigger,
+    selectedModel,
+    messages,
+    chatId,
+    regenerate,
+    router,
+    searchParams,
+  ]);
+
+  const handleSubmit = async (message: PromptInputMessage) => {
+    const text = message.text?.trim();
+    if (!text) return;
+    if (!selectedModel) {
+      toast.error("Please select a model first");
+      return;
+    }
+
+    if (isBuzy) return;
+
+    try {
+      await sendMessage(
+        { text },
+        {
+          body: {
+            chatId,
+            model: selectedModel,
+            skipUserMessage: false,
+          },
+        }
+      );
+    } catch (error) {
+      console.error("Send message failed:", error);
+      toast.error("Failed to send message");
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto p-6 relative size-full h-[calc(100vh-4rem)]">
+      <div className="flex flex-col h-full">
+        <Conversation className="h-full">
           <ConversationContent>
-            {allMessages.length === 0 ? (
+            {messages.length === 0 ? (
               <ConversationEmptyState
                 title="Start the conversation"
                 description="Send a message to get started."
               />
             ) : (
-              allMessages.map((message) => (
+              messages.map((message) => (
                 <Fragment key={message.id}>
                   {message.parts.map((part, i) => (
                     <MessagePart
@@ -159,7 +271,7 @@ export const MessageViewForm = ({chatId}:{chatId:string}) => {
                       role={message.role}
                       isStreaming={
                         isBuzy &&
-                        message === allMessages.at(-1) &&
+                        message === messages.at(-1) &&
                         i === message.parts.length - 1
                       }
                     />
@@ -184,32 +296,33 @@ export const MessageViewForm = ({chatId}:{chatId:string}) => {
           <ConversationScrollButton />
         </Conversation>
 
-            {/* Input */}
-            <PromptInput onSubmit={handleSubmit} className="mt-4">
-                <PromptInputBody>
-                    <PromptInputTextarea placeholder="Write a message" value={input} onChange={(e)=>setInput(e.target.value)} disabled={false}/>
-                </PromptInputBody>
+        <PromptInput onSubmit={handleSubmit} className="mt-4">
+          <PromptInputBody>
+            <PromptInputTextarea
+              placeholder="Type your message..."
+              disabled={isBuzy}
+            />
+          </PromptInputBody>
 
-                <PromptInputFooter>
+          <PromptInputFooter>
             <PromptInputTools className="flex items-center justify-between gap-2 w-full">
               <div className="flex-1">
                 {isModelLoading ? (
                   <Spinner />
                 ) : (
                   <ModelSelector
-                    models={models?.models ?? []}
+                    models={modelsData?.models ?? []}
                     selectedModelId={selectedModel}
-                    onModelSelect={setSelectedModel} 
+                    onModelSelect={setSelectedModel}
                     className=""
                   />
                 )}
-              </div> 
+              </div>
               <PromptInputSubmit status={status} onStop={stop} />
             </PromptInputTools>
           </PromptInputFooter>
-            </PromptInput>
-
-          </div>
-        </div>
-    )
-}       
+        </PromptInput>
+      </div>
+    </div>
+  );
+};
